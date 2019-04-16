@@ -24,12 +24,18 @@
 		{ 0xb4, 0x8d, 0xb2, 0x60, 0xaf, 0x5d, 0xb9, 0x12} }
 
 /* Command IDs */
-#define IPERFTZ_TA_RUN		0
+enum cmd_id {
+  IPERFTZ_TA_RECV,
+  IPERFTZ_TA_SEND
+};
 
 struct iptz_results {
-  uint32_t worlds_sec;  /* world switch time seconds */
-  uint32_t worlds_msec; /* world switch time milliseconds */
+  uint32_t worlds_sec;   /* world switch time seconds */
+  uint32_t worlds_msec;  /* world switch time milliseconds */
+  uint32_t runtime_sec;  /* runtime seconds */
+  uint32_t runtime_msec; /* runtime milliseconds */
   uint32_t cycles;
+  uint32_t zcycles;
 };
 
 #endif /* IPERFTZ_TA_H */

@@ -28,16 +28,16 @@
 
 static void print_results(struct iptz_results *results)
 {
-  printf("cycles = %" PRIu32 ", worlds_time = %" PRIu32 ".%.3" PRIu32 " s\n", results->cycles, results->worlds_sec, results->worlds_msec);
+  printf("cycles = %" PRIu32 ", zcycles = %" PRIu32 ", worlds_time = %" PRIu32 ".%.3" PRIu32 " s, runtime = %" PRIu32 ".%.3" PRIu32 " s\n", results->cycles, results->zcycles, results->worlds_sec, results->worlds_msec, results->runtime_sec, results->runtime_msec);
 }
 
 int main(void)
 {
   int rc = EXIT_SUCCESS;
-  TEEC_Result res;
   TEEC_Context ctx;
-  TEEC_Session sess;
   TEEC_Operation op;
+  TEEC_Result res;
+  TEEC_Session sess;
   TEEC_SharedMemory results_sm;
   TEEC_UUID uuid = IPERFTZ_TA_UUID;
   uint32_t ret_orig;
@@ -60,14 +60,14 @@ int main(void)
   results = (struct iptz_results *)results_sm.buffer;
     
   res = TEEC_OpenSession(&ctx, &sess, &uuid,
-                         TEEC_LOGIN_PUBLIC, NULL, NULL, &ret_orig);
+			 TEEC_LOGIN_PUBLIC, NULL, NULL, &ret_orig);
   if (res != TEEC_SUCCESS) {
     fprintf(stderr, "TEEC_Opensession failed with code %#" PRIx32 " origin %#" PRIx32 "\n",
             res, ret_orig);
     rc = EXIT_FAILURE;
     goto session_err;
   }
-  
+
   memset(&op, 0, sizeof(op));
   op.paramTypes = TEEC_PARAM_TYPES(TEEC_NONE, TEEC_MEMREF_WHOLE,
 				   TEEC_NONE, TEEC_NONE);
@@ -75,7 +75,7 @@ int main(void)
   op.params[1].memref.offset = 0;
   op.params[1].memref.size = results_sm.size;
 
-  res = TEEC_InvokeCommand(&sess, IPERFTZ_TA_RUN, &op, &ret_orig);
+  res = TEEC_InvokeCommand(&sess, IPERFTZ_TA_SEND, &op, &ret_orig);
   if (res != TEEC_SUCCESS) {
     fprintf(stderr, "TEEC_InvokeCommand failed with code %#" PRIx32 " origin %#" PRIx32, res, ret_orig);
     rc = EXIT_FAILURE;
