@@ -17,30 +17,88 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <tee_client_api.h>
 
 #include <iperfTZ_ta.h>
 
-static void print_results(struct iptz_results *results)
+static int print_results(struct iptz_results *results, struct iptz_args *args)
 {
-  printf("cycles = %" PRIu32 ", zcycles = %" PRIu32 ", worlds_time = %" PRIu32 ".%.3" PRIu32 " s, runtime = %" PRIu32 ".%.3" PRIu32 " s\n", results->cycles, results->zcycles, results->worlds_sec, results->worlds_msec, results->runtime_sec, results->runtime_msec);
+  FILE *fp;
+
+  printf("cycles = %" PRIu32 ", zcycles = %" PRIu32 ", bytes transmitted = %" PRIu32 ", worlds_time = %" PRIu32 ".%.3" PRIu32 " s, runtime = %" PRIu32 ".%.3" PRIu32 " s\n", results->cycles, results->zcycles, results->bytes_transmitted, results->worlds_sec, results->worlds_msec, results->runtime_sec, results->runtime_msec);
+
+  fp = fopen("./iperfTZ-ca.csv", "a");
+  if (fp == NULL) {
+    perror("fopen");
+    return errno;
+  }
+  fprintf(fp, "%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 ".%.3" PRIu32 ",%" PRIu32 ",%" PRIu32 "\n", args->blksize >> 10, args->socket_bufsize >> 10, results->bytes_transmitted, results->runtime_sec, results->runtime_msec, results->cycles, results->zcycles);
+  fclose(fp);
+
+  return 0;
 }
 
-int main(void)
+static void init_args(struct iptz_args *args)
 {
-  int rc = EXIT_SUCCESS;
+  args->blksize = TCP_WINDOW_DEFAULT;
+  args->socket_bufsize = TCP_WINDOW_DEFAULT;
+}
+
+static int parse_args(struct iptz_args *args,
+		      char *argv[],
+		      int argc)
+{
+  int c;
+  int errflg = 0;
+  
+  while ((c = getopt(argc, argv, "l:w:")) != -1) {
+    switch (c) {
+    case 'l':
+      args->blksize = strtoul(optarg, (char **)NULL, 10);
+      break;
+    case 'w':
+      args->socket_bufsize = strtoul(optarg, (char **)NULL, 10);
+      if (args->socket_bufsize > ((1L<<30)-(1<<14))) {
+	fprintf(stderr, "TCP window exceeds TCP sequence number limit\n");
+	errflg++;
+      }
+      break;
+    case ':':
+      fprintf(stderr, "Option -%c requires an operand\n", optopt);
+      errflg++;
+      break;
+    case '?':
+      fprintf(stderr, "Unrecognized option: '-%c'\n", optopt);
+      errflg++;
+    }
+  }
+  if (errflg) {
+    errno = EINVAL;
+    fprintf(stderr, "usage: %s -l size -w size\n", argv[0]);
+    return EINVAL;
+  }
+
+  return 0;
+}
+
+int main(int argc, char *argv[])
+{
+  int rc;
   TEEC_Context ctx;
   TEEC_Operation op;
   TEEC_Result res;
   TEEC_Session sess;
-  TEEC_SharedMemory results_sm;
+  TEEC_SharedMemory args_sm, results_sm;
   TEEC_UUID uuid = IPERFTZ_TA_UUID;
   uint32_t ret_orig;
+  struct iptz_args *args;
   struct iptz_results *results;
 
   res = TEEC_InitializeContext(NULL, &ctx);
@@ -49,14 +107,30 @@ int main(void)
     return EXIT_FAILURE;
   }
 
+  args_sm.size = sizeof(*args);
+  args_sm.flags = TEEC_MEM_INPUT;
+  res = TEEC_AllocateSharedMemory(&ctx, &args_sm);
+  if (res != TEEC_SUCCESS) {
+    fprintf(stderr, "TEEC_AllocateSharedMemory failed with code %#" PRIx32 "\n", res);
+    rc = EXIT_FAILURE;
+    goto shared_args_err;
+  }
+  
   results_sm.size = sizeof(*results);
   results_sm.flags = TEEC_MEM_OUTPUT;
   res = TEEC_AllocateSharedMemory(&ctx, &results_sm);
   if (res != TEEC_SUCCESS) {
     fprintf(stderr, "TEEC_AllocateSharedMemory failed with code %#" PRIx32 "\n", res);
     rc = EXIT_FAILURE;
-    goto shared_mem_err;
+    goto shared_results_err;
   }
+
+  args = (struct iptz_args *)args_sm.buffer;
+  init_args(args);
+  rc = parse_args(args, argv, argc);
+  if (rc != 0)
+    goto session_err;
+  
   results = (struct iptz_results *)results_sm.buffer;
     
   res = TEEC_OpenSession(&ctx, &sess, &uuid,
@@ -69,8 +143,11 @@ int main(void)
   }
 
   memset(&op, 0, sizeof(op));
-  op.paramTypes = TEEC_PARAM_TYPES(TEEC_NONE, TEEC_MEMREF_WHOLE,
+  op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_WHOLE, TEEC_MEMREF_WHOLE,
 				   TEEC_NONE, TEEC_NONE);
+  op.params[0].memref.parent = &args_sm;
+  op.params[0].memref.offset = 0;
+  op.params[0].memref.size = args_sm.size;
   op.params[1].memref.parent = &results_sm;
   op.params[1].memref.offset = 0;
   op.params[1].memref.size = results_sm.size;
@@ -80,14 +157,16 @@ int main(void)
     fprintf(stderr, "TEEC_InvokeCommand failed with code %#" PRIx32 " origin %#" PRIx32, res, ret_orig);
     rc = EXIT_FAILURE;
   } else {
-    print_results(results);
+    rc = print_results(results, args);
   }
 
   TEEC_CloseSession(&sess);
  session_err:
   TEEC_ReleaseSharedMemory(&results_sm);
- shared_mem_err:
+ shared_results_err:
+  TEEC_ReleaseSharedMemory(&args_sm);
+ shared_args_err:
   TEEC_FinalizeContext(&ctx);
-
+  
   return rc;
 }

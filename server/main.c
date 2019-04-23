@@ -32,7 +32,7 @@
 
 #include <netinet/tcp.h>
 
-#define BUFFER_SIZE (128 * 1024)
+#include <iperfTZ_ta.h>
 
 struct args {
   size_t blksize;
@@ -41,8 +41,8 @@ struct args {
 
 static void init_args(struct args *args)
 {
-  args->blksize = BUFFER_SIZE;  
-  args->socket_bufsize = BUFFER_SIZE;
+  args->blksize = TCP_WINDOW_DEFAULT;
+  args->socket_bufsize = TCP_WINDOW_DEFAULT;
 }
 
 static char *init_buffer(struct args *args)

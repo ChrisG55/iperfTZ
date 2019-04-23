@@ -29,6 +29,13 @@ enum cmd_id {
   IPERFTZ_TA_SEND
 };
 
+#define TCP_WINDOW_DEFAULT (16 * 1024)
+
+struct iptz_args {
+  uint32_t blksize;
+  uint32_t socket_bufsize;
+};
+
 struct iptz_results {
   uint32_t worlds_sec;   /* world switch time seconds */
   uint32_t worlds_msec;  /* world switch time milliseconds */
@@ -36,6 +43,9 @@ struct iptz_results {
   uint32_t runtime_msec; /* runtime milliseconds */
   uint32_t cycles;
   uint32_t zcycles;
+  uint32_t bytes_transmitted;
 };
+
+#define BUFFER_SIZE (128 * 1024)
 
 #endif /* IPERFTZ_TA_H */

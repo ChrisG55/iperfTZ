@@ -27,13 +27,13 @@
 
 #include <iperfTZ_ta.h>
 
-#define BUFFER_SIZE (128 * 1024)
 #define INET_ADDRSTRLEN 16
 
 static void init_results(struct iptz_results *results)
 {
   results->cycles = 0;
   results->zcycles = 0;
+  results->bytes_transmitted = 0;
   results->worlds_sec = 0;
   results->worlds_msec = 0;
   results->runtime_sec = 0;
@@ -42,10 +42,11 @@ static void init_results(struct iptz_results *results)
 
 static TEE_Result tcp_connect(TEE_tcpSocket_Setup *setup,
 			      TEE_iSocketHandle *ctx,
-			      uint32_t commandCode)
+			      uint32_t commandCode,
+			      uint32_t bufsize)
 {
-  uint32_t bufsz = BUFFER_SIZE;
-  uint32_t buflen = sizeof(bufsz);
+  uint32_t buflen = sizeof(bufsize);
+  uint32_t bufsz = bufsize;
   const char *ip = "127.0.0.1";
   uint32_t protocolError;
   TEE_Result res;
@@ -67,7 +68,7 @@ static TEE_Result tcp_connect(TEE_tcpSocket_Setup *setup,
   res = TEE_tcpSocket->ioctl(*ctx, commandCode, &bufsz, &buflen);
   if (res != TEE_SUCCESS) {
     EMSG("ioctl() failed for TCP. Return code: %#0" PRIX32
-	 ", bufsz = %" PRIX32, res, bufsz);
+	 ", socket_bufsize = %" PRIX32, res, bufsz);
     goto socket_err;
   }
 
@@ -78,9 +79,20 @@ static TEE_Result tcp_connect(TEE_tcpSocket_Setup *setup,
   return res;
 }
 
+static char *init_buffer(struct iptz_args *args)
+{
+  char *buffer;
+  buffer = (char *)TEE_Malloc(args->blksize, TEE_MALLOC_FILL_ZERO);
+  if (buffer == NULL)
+    return buffer;
+  
+  TEE_GenerateRandom(buffer, args->blksize);
+  return buffer;
+}
+
 static TEE_Result iperfTZ_recv(uint32_t param_types, TEE_Param __maybe_unused params[4])
 {
-  uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_VALUE_OUTPUT,
+  uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_VALUE_INOUT,
 					     TEE_PARAM_TYPE_VALUE_OUTPUT,
 					     TEE_PARAM_TYPE_VALUE_OUTPUT,
 					     TEE_PARAM_TYPE_VALUE_OUTPUT);
@@ -99,22 +111,26 @@ static TEE_Result iperfTZ_send(uint32_t param_types, TEE_Param params[4])
   TEE_Result res;
   TEE_tcpSocket_Setup tcpSetup;
   TEE_Time ta, ti, to;
-  char buffer[BUFFER_SIZE];
-  uint32_t bufsz = BUFFER_SIZE;
+  char *buffer;
+  uint32_t buflen;
+  struct iptz_args *args;
   struct iptz_results *results;
-  uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_NONE,
+  uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
 					     TEE_PARAM_TYPE_MEMREF_OUTPUT,
 					     TEE_PARAM_TYPE_NONE,
 					     TEE_PARAM_TYPE_NONE);
   if (param_types != exp_param_types)
     return TEE_ERROR_BAD_PARAMETERS;
 
+  args = (struct iptz_args *)params[0].memref.buffer;
   results = (struct iptz_results *)params[1].memref.buffer;
-  
-  TEE_GenerateRandom(buffer, bufsz);
 
+  buffer = init_buffer(args);
+  if (buffer == NULL)
+    return TEE_ERROR_OUT_OF_MEMORY;
+  
   socket = TEE_tcpSocket;
-  res = tcp_connect(&tcpSetup, &socketCtx, TEE_TCP_SET_SENDBUF);
+  res = tcp_connect(&tcpSetup, &socketCtx, TEE_TCP_SET_SENDBUF, args->socket_bufsize);
   if (res != TEE_SUCCESS)
     return res;
   
@@ -128,10 +144,10 @@ static TEE_Result iperfTZ_send(uint32_t param_types, TEE_Param params[4])
     TEE_GetSystemTime(&ti);
     bytes = 0;
     do {
-      bufsz = BUFFER_SIZE - bytes;
-      res = socket->send(socketCtx, buffer + bytes, &bufsz, 1);
-      bytes += bufsz;
-    } while ((bytes < BUFFER_SIZE) && (res == TEE_SUCCESS));
+      buflen = args->blksize - bytes;
+      res = socket->send(tcpCtx, buffer + bytes, &buflen, TEE_TIMEOUT_INFINITE);
+      bytes += buflen;
+    } while ((bytes < args->blksize) && (res == TEE_SUCCESS));
     TEE_GetSystemTime(&to);
     
     diff = ti.millis - ta.millis;
@@ -153,6 +169,7 @@ static TEE_Result iperfTZ_send(uint32_t param_types, TEE_Param params[4])
     }
     
     results->cycles++;
+    results->bytes_transmitted += bytes;
     diff = to.millis - ta.millis;
     if (diff > to.millis) {
       results->runtime_sec = to.seconds - ta.seconds - 1;

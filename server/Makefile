@@ -9,7 +9,7 @@ READELF ?= $(CROSS_COMPILE)readelf
 
 OBJS = main.o
 
-CFLAGS += -Wall
+CFLAGS += -Wall -I../ta/include
 
 BINARY = iperfTZ
 

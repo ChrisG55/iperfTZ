@@ -22,10 +22,10 @@
 
 #include <iperfTZ_ta.h>
 
-#define TA_DATA_SIZE   (256 * 1024) /* heap size */
+#define TA_DATA_SIZE   ((1024 * 1024) - (16 * 1024)) /* heap size */
 #define TA_DESCRIPTION "Generic Interface Socket Trusted Application"
 #define TA_FLAGS       TA_FLAG_EXEC_DDR
-#define TA_STACK_SIZE  (256 * 1024)
+#define TA_STACK_SIZE  (16 * 1024)
 #define TA_UUID	       IPERFTZ_TA_UUID
 #define TA_VERSION     "0.1"
 
