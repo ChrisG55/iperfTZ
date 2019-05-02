@@ -140,36 +140,41 @@ static TEE_Result iperfTZ_send(uint32_t param_types, TEE_Param params[4])
   do {
     uint32_t bytes;
     uint32_t diff;
+
+    if ((args->bitrate == 0U) || (args->bitrate > ((results->bytes_transmitted + args->blksize) * 8 / (results->runtime_sec * 1000 + results->runtime_msec) * 1000))) {
+      TEE_GetSystemTime(&ti);
+      bytes = 0;
+      do {
+	buflen = args->blksize - bytes;
+	res = socket->send(socketCtx, buffer + bytes, &buflen, TEE_TIMEOUT_INFINITE);
+	bytes += buflen;
+      } while ((bytes < args->blksize) && (res == TEE_SUCCESS));
+      TEE_GetSystemTime(&to);
+        
+      diff = ti.millis - ta.millis;
+      if (diff > ti.millis) {
+	results->worlds_sec += ti.seconds - ta.seconds - 1;
+	results->worlds_msec += ti.millis + (0xffffffff - diff);
+      } else {
+	uint32_t seconds;
+	seconds = ti.seconds - ta.seconds;
+	results->worlds_sec += seconds;
+	results->worlds_msec += diff;
+	if ((seconds == 0) && (diff == 0))
+	  results->zcycles++;
+      }
+
+      while (results->worlds_msec >= 1000) {
+	results->worlds_sec++;
+	results->worlds_msec -= 1000;
+      }
     
-    TEE_GetSystemTime(&ti);
-    bytes = 0;
-    do {
-      buflen = args->blksize - bytes;
-      res = socket->send(tcpCtx, buffer + bytes, &buflen, TEE_TIMEOUT_INFINITE);
-      bytes += buflen;
-    } while ((bytes < args->blksize) && (res == TEE_SUCCESS));
-    TEE_GetSystemTime(&to);
-    
-    diff = ti.millis - ta.millis;
-    if (diff > ti.millis) {
-      results->worlds_sec += ti.seconds - ta.seconds - 1;
-      results->worlds_msec += ti.millis + (0xffffffff - diff);
+      results->cycles++;
+      results->bytes_transmitted += bytes;
     } else {
-      uint32_t seconds;
-      seconds = ti.seconds - ta.seconds;
-      results->worlds_sec += seconds;
-      results->worlds_msec += diff;
-      if ((seconds == 0) && (diff == 0))
-	results->zcycles++;
+      TEE_GetSystemTime(&to);
     }
 
-    while (results->worlds_msec >= 1000) {
-      results->worlds_sec++;
-      results->worlds_msec -= 1000;
-    }
-    
-    results->cycles++;
-    results->bytes_transmitted += bytes;
     diff = to.millis - ta.millis;
     if (diff > to.millis) {
       results->runtime_sec = to.seconds - ta.seconds - 1;

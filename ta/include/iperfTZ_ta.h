@@ -34,6 +34,7 @@ enum cmd_id {
 struct iptz_args {
   uint32_t blksize;
   uint32_t socket_bufsize;
+  uint32_t bitrate;
 };
 
 struct iptz_results {
