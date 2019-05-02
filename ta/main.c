@@ -183,7 +183,9 @@ static TEE_Result iperfTZ_send(uint32_t param_types, TEE_Param params[4])
       results->runtime_sec = to.seconds - ta.seconds;
       results->runtime_msec = diff;
     }
-  } while ((results->runtime_sec < 10) && (res == TEE_SUCCESS));
+  } while (((args->transmit_bytes == 0) && (results->runtime_sec < 10)) ||
+	   (((args->transmit_bytes > 0) && (results->bytes_transmitted < args->transmit_bytes)) &&
+	    (res == TEE_SUCCESS)));
 
   socket->close(socketCtx);
 

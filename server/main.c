@@ -37,12 +37,14 @@
 struct args {
   size_t blksize;
   size_t socket_bufsize;
+  unsigned long int transmit_bytes;
 };
 
 static void init_args(struct args *args)
 {
   args->blksize = TCP_WINDOW_DEFAULT;
   args->socket_bufsize = TCP_WINDOW_DEFAULT;
+  args->transmit_bytes = 0;
 }
 
 static char *init_buffer(struct args *args)
@@ -56,8 +58,7 @@ static char *init_buffer(struct args *args)
 
 static int parse_args(struct args *args,
 		      char *argv[],
-		      int argc,
-		      int *transmit_bytes)
+		      int argc)
 {
   int c;
   int errflg = 0;
@@ -68,7 +69,7 @@ static int parse_args(struct args *args,
       args->blksize = strtoul(optarg, (char **)NULL, 10);
       break;
     case 'n':
-      *transmit_bytes = atoi(optarg);
+      args->transmit_bytes = strtoul(optarg, (char **)NULL, 10);
       break;
     case 'w':
       args->socket_bufsize = strtoul(optarg, (char **)NULL, 10);
@@ -185,7 +186,6 @@ int main(int argc, char *argv[])
   char *buffer;
   int rc = EXIT_SUCCESS;
   int connection, sockfd;
-  int transmit_bytes = 0;
   long long td;
   long long net_ns = 0;
   ssize_t bytes_transmitted = 0, n;
@@ -193,13 +193,13 @@ int main(int argc, char *argv[])
   struct args args;
 
   init_args(&args);
-  rc = parse_args(&args, argv, argc, &transmit_bytes);
+  rc = parse_args(&args, argv, argc);
   if (rc != 0)
     return rc;
   
   printf("Block size = %zd\nBuffer size = %zd\n", args.blksize, args.socket_bufsize);
-  if (transmit_bytes > 0)
-    printf("Bytes to transmit = %d\n", transmit_bytes);
+  if (args.transmit_bytes > 0)
+    printf("Bytes to transmit = %ld\n", args.transmit_bytes);
   
   buffer = init_buffer(&args);
   if (buffer == NULL)
@@ -233,8 +233,8 @@ int main(int argc, char *argv[])
   again:
     clock_gettime(CLOCK_REALTIME, &to);
     td = (to.tv_sec - ta.tv_sec) * 1000000000LL + to.tv_nsec - ta.tv_nsec;
-  } while (((transmit_bytes == 0) && (td < 10000000000LL)) ||
-	   ((transmit_bytes > 0) && (bytes_transmitted < transmit_bytes)));
+  } while (((args.transmit_bytes == 0) && (td < 10000000000LL)) ||
+	   ((args.transmit_bytes > 0) && (bytes_transmitted < args.transmit_bytes)));
   
   printf("bytes transmitted: %zd B\nnet time: %lli ns\nruntime = %lli ns\n", bytes_transmitted, net_ns, td);
 
