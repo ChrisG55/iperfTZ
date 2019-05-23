@@ -24,6 +24,7 @@
 #include <tee_internal_api_extensions.h>
 #include <tee_tcpsocket.h>
 #include <__tee_tcpsocket_defines_extensions.h>
+#include <tee_udpsocket.h>
 
 #include <iperfTZ_ta.h>
 
@@ -63,6 +64,27 @@ static TEE_Result tcp_connect(TEE_tcpSocket_Setup *setup,
   if (res != TEE_SUCCESS) {
     EMSG("ioctl() failed for TCP. Return code: %#0" PRIX32
 	 ", socket_bufsize = %" PRIX32, res, bufsz);
+    return res;
+  }
+
+  return TEE_SUCCESS;
+}
+
+static TEE_Result udp_connect(TEE_udpSocket_Setup *setup,
+			      TEE_iSocketHandle *ctx,
+			      struct iptz_args *args)
+{
+  TEE_Result res;
+  uint32_t protocolError;
+  
+  setup->ipVersion = TEE_IP_VERSION_DC;
+  setup->server_addr = args->ip;
+  setup->server_port = 5002U;
+
+  res = TEE_udpSocket->open(ctx, setup, &protocolError);
+  if (res != TEE_SUCCESS) {
+    EMSG("open() failed for UDP. Return code: %#0" PRIX32
+	 ", protocol error: %#0" PRIX32, res, protocolError);
     return res;
   }
 

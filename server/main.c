@@ -97,7 +97,46 @@ static int parse_args(struct args *args,
   return 0;
 }
 
-static int print_results(int connection)
+static int tcp_connect(struct sockaddr_in *server_addr,
+		       int *connection,
+		       int sockfd)
+{
+  socklen_t addrlen;
+  int val;
+  
+  if (listen(sockfd, 5) == -1) {
+    perror("listen");
+    return -1;
+  }
+  
+  addrlen = sizeof(struct sockaddr);
+  if ((*connection = accept(sockfd, (struct sockaddr *)server_addr, &addrlen)) == -1) {
+    perror("accept");
+    close(sockfd);
+    return -1;
+  }
+
+  if ((val = fcntl(*connection, F_GETFD, 0)) == -1) {
+    perror("fcntl");
+    goto tcp_cleanup;
+  }
+
+  val |= O_NONBLOCK;
+  
+  if ((val = fcntl(*connection, F_SETFL, val)) == -1) {
+    perror("fcntl");
+    goto tcp_cleanup;
+  }
+
+  return 0;
+
+ tcp_cleanup:
+  close(connection);
+  close(sockfd);
+  return -1;
+}
+
+static int tcp_print_results(int connection)
 {
   FILE *fp;
   struct tcp_info info;
@@ -123,28 +162,26 @@ static int print_results(int connection)
   return rc;
 }
 
-static void tcp_destroy(int sockfd, int connection)
+static int socket_setup(struct args *args, int *sockfd, int *connection)
 {
-  close(connection);
-  close(sockfd);
-}
-
-static int tcp_setup(struct args *args, int *sockfd, int *connection)
-{
-  int val;
+  int sock_type = SOCK_STREAM;
   struct sockaddr_in server_addr;
   in_port_t port = 5002;
-  socklen_t addrlen;
+
+  if (args->protocol == ISPERF_UDP)
+    sock_type = SOCK_DGRAM;
   
-  *sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  *sockfd = socket(AF_INET, sock_type, 0);
   if (*sockfd == -1) {
     perror("socket");
     return *sockfd;
   }
 
-  if (setsockopt(*sockfd, SOL_SOCKET, SO_RCVBUF, &args->socket_bufsize, sizeof(args->socket_bufsize)) == -1) {
-    perror("setsockopt");
-    return -1;
+  if (args->protocol == ISPERF_TCP) {
+    if (setsockopt(*sockfd, SOL_SOCKET, SO_RCVBUF, &args->socket_bufsize, sizeof(args->socket_bufsize)) == -1) {
+      perror("setsockopt");
+      return -1;
+    }
   }
   
   memset(&server_addr, 0, sizeof(server_addr));
@@ -157,32 +194,9 @@ static int tcp_setup(struct args *args, int *sockfd, int *connection)
     return -1;
   }
 
-  if (listen(*sockfd, 5) == -1) {
-    perror("listen");
-    return -1;
-  }
+  if (args->protocol == ISPERF_TCP)
+    return tcp_connect(&server_addr, connection, *sockfd);
   
-  addrlen = sizeof(struct sockaddr);
-  if ((*connection = accept(*sockfd, (struct sockaddr *)&server_addr, &addrlen)) == -1) {
-    perror("accept");
-    close(*sockfd);
-    return -1;
-  }
-
-  if ((val = fcntl(*connection, F_GETFD, 0)) == -1) {
-    perror("fcntl");
-    tcp_destroy(*sockfd, *connection);
-    return -1;
-  }
-
-  val |= O_NONBLOCK;
-  
-  if ((val = fcntl(*connection, F_SETFL, val)) == -1) {
-    perror("fcntl");
-    tcp_destroy(*sockfd, *connection);
-    return -1;
-  }
-
   return 0;
 }
 
@@ -210,7 +224,7 @@ int main(int argc, char *argv[])
   if (buffer == NULL)
     return EXIT_FAILURE;
 
-  rc = tcp_setup(&args, &sockfd, &connection);
+  rc = socket_setup(&args, &sockfd, &connection);
   if (rc != 0)
     goto cleanup;
   
@@ -252,11 +266,13 @@ int main(int argc, char *argv[])
     td = (to.tv_sec - ta.tv_sec) * 1000000000LL + to.tv_nsec - ta.tv_nsec;
   } while ((td < 2000000000LL) || (n > 0));
 
-  rc = print_results(connection);
+  rc = tcp_print_results(connection);
   
  cleanup:
   free(buffer);
-  tcp_destroy(sockfd, connection);
+  if (args.protocol == ISPERF_TCP)
+    close(connection);
+  close(sockfd);
   
   return rc;
 }
