@@ -58,10 +58,13 @@ static int parse_args(struct iptz_args *args,
   int c;
   int errflg = 0;
   
-  while ((c = getopt(argc, argv, "b:l:n:w:")) != -1) {
+  while ((c = getopt(argc, argv, "b:i:l:n:w:")) != -1) {
     switch (c) {
     case 'b':
       args->bitrate = strtoul(optarg, (char **)NULL, 10);
+      break;
+    case 'i':
+      strncpy(args->ip, optarg, ISPERF_ADDRSTRLEN);
       break;
     case 'l':
       args->blksize = strtoul(optarg, (char **)NULL, 10);
@@ -87,7 +90,7 @@ static int parse_args(struct iptz_args *args,
   }
   if (errflg) {
     errno = EINVAL;
-    fprintf(stderr, "usage: %s -b size -l size -n size -w size\n", argv[0]);
+    fprintf(stderr, "usage: %s -b size -i IP -l size -n size -w size\n", argv[0]);
     return EINVAL;
   }
 

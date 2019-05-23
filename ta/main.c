@@ -27,8 +27,6 @@
 
 #include <iperfTZ_ta.h>
 
-#define INET_ADDRSTRLEN 16
-
 static void init_results(struct iptz_results *results)
 {
   results->cycles = 0;
@@ -42,41 +40,33 @@ static void init_results(struct iptz_results *results)
 
 static TEE_Result tcp_connect(TEE_tcpSocket_Setup *setup,
 			      TEE_iSocketHandle *ctx,
-			      uint32_t commandCode,
-			      uint32_t bufsize)
+			      struct iptz_args *args,
+			      uint32_t commandCode)
 {
-  uint32_t buflen = sizeof(bufsize);
-  uint32_t bufsz = bufsize;
-  const char *ip = "127.0.0.1";
+  uint32_t buflen = sizeof(args->socket_bufsize);
+  uint32_t bufsz = args->socket_bufsize;
   uint32_t protocolError;
   TEE_Result res;
 
   setup->ipVersion = TEE_IP_VERSION_DC;
-  setup->server_addr = (char *)TEE_Malloc(INET_ADDRSTRLEN, TEE_MALLOC_FILL_ZERO);
-  if (setup->server_addr == NULL)
-    return TEE_ERROR_OUT_OF_MEMORY;
-  TEE_MemMove(setup->server_addr, ip, INET_ADDRSTRLEN);
+  setup->server_addr = args->ip;
   setup->server_port = 5002U;
 
   res = TEE_tcpSocket->open(ctx, setup, &protocolError);
   if (res != TEE_SUCCESS) {
     EMSG("open() failed for TCP. Return code: %#0" PRIX32
 	 ", protocol error: %#0" PRIX32, res, protocolError);
-    goto socket_err;
+    return res;
   }
 
   res = TEE_tcpSocket->ioctl(*ctx, commandCode, &bufsz, &buflen);
   if (res != TEE_SUCCESS) {
     EMSG("ioctl() failed for TCP. Return code: %#0" PRIX32
 	 ", socket_bufsize = %" PRIX32, res, bufsz);
-    goto socket_err;
+    return res;
   }
 
   return TEE_SUCCESS;
-
- socket_err:
-  TEE_Free(setup->server_addr);
-  return res;
 }
 
 static char *init_buffer(struct iptz_args *args)
@@ -130,7 +120,7 @@ static TEE_Result iperfTZ_send(uint32_t param_types, TEE_Param params[4])
     return TEE_ERROR_OUT_OF_MEMORY;
   
   socket = TEE_tcpSocket;
-  res = tcp_connect(&tcpSetup, &socketCtx, TEE_TCP_SET_SENDBUF, args->socket_bufsize);
+  res = tcp_connect(&tcpSetup, &socketCtx, args, TEE_TCP_SET_SENDBUF);
   if (res != TEE_SUCCESS)
     return res;
   
@@ -189,8 +179,6 @@ static TEE_Result iperfTZ_send(uint32_t param_types, TEE_Param params[4])
 
   socket->close(socketCtx);
 
-  TEE_Free(tcpSetup.server_addr);
-  
   if (res != TEE_SUCCESS)
     EMSG("send() failed for socket. Return code: %#0" PRIX32, res);
 
