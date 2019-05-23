@@ -29,6 +29,11 @@ enum cmd_id {
   IPERFTZ_TA_SEND
 };
 
+enum protocol {
+  ISPERF_TCP,
+  ISPERF_UDP
+};
+
 #define ISPERF_ADDRSTRLEN 46
 #define TCP_WINDOW_DEFAULT (16 * 1024)
 
@@ -38,6 +43,7 @@ struct iptz_args {
   uint32_t bitrate;
   uint32_t transmit_bytes;
   char ip[ISPERF_ADDRSTRLEN];
+  uint32_t protocol;
 };
 
 struct iptz_results {

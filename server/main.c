@@ -38,6 +38,7 @@ struct args {
   size_t blksize;
   size_t socket_bufsize;
   unsigned long int transmit_bytes;
+  unsigned int protocol;
 };
 
 static void init_args(struct args *args)
@@ -45,6 +46,7 @@ static void init_args(struct args *args)
   args->blksize = TCP_WINDOW_DEFAULT;
   args->socket_bufsize = TCP_WINDOW_DEFAULT;
   args->transmit_bytes = 0;
+  args->protocol = ISPERF_TCP;
 }
 
 static char *init_buffer(struct args *args)
@@ -63,13 +65,16 @@ static int parse_args(struct args *args,
   int c;
   int errflg = 0;
 
-  while ((c = getopt(argc, argv, "l:n:w:")) != -1) {
+  while ((c = getopt(argc, argv, "l:n:uw:")) != -1) {
     switch (c) {
     case 'l':
       args->blksize = strtoul(optarg, (char **)NULL, 10);
       break;
     case 'n':
       args->transmit_bytes = strtoul(optarg, (char **)NULL, 10);
+      break;
+    case 'u':
+      args->protocol = ISPERF_UDP;
       break;
     case 'w':
       args->socket_bufsize = strtoul(optarg, (char **)NULL, 10);
@@ -85,7 +90,7 @@ static int parse_args(struct args *args,
   }
   if (errflg) {
     errno = EINVAL;
-    fprintf(stderr, "usage: %s -l size -n size -w size\n", argv[0]);
+    fprintf(stderr, "usage: %s -l size -n size -u -w size\n", argv[0]);
     return EINVAL;
   }
 

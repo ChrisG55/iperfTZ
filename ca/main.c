@@ -49,6 +49,7 @@ static void init_args(struct iptz_args *args)
 {
   args->blksize = TCP_WINDOW_DEFAULT;
   args->socket_bufsize = TCP_WINDOW_DEFAULT;
+  args->protocol = ISPERF_TCP;
 }
 
 static int parse_args(struct iptz_args *args,
@@ -58,7 +59,7 @@ static int parse_args(struct iptz_args *args,
   int c;
   int errflg = 0;
   
-  while ((c = getopt(argc, argv, "b:i:l:n:w:")) != -1) {
+  while ((c = getopt(argc, argv, "b:i:l:n:uw:")) != -1) {
     switch (c) {
     case 'b':
       args->bitrate = strtoul(optarg, (char **)NULL, 10);
@@ -71,6 +72,9 @@ static int parse_args(struct iptz_args *args,
       break;
     case 'n':
       args->transmit_bytes = strtoul(optarg, (char **)NULL, 10);
+      break;
+    case 'u':
+      args->protocol = ISPERF_UDP;
       break;
     case 'w':
       args->socket_bufsize = strtoul(optarg, (char **)NULL, 10);
@@ -90,7 +94,7 @@ static int parse_args(struct iptz_args *args,
   }
   if (errflg) {
     errno = EINVAL;
-    fprintf(stderr, "usage: %s -b size -i IP -l size -n size -w size\n", argv[0]);
+    fprintf(stderr, "usage: %s -b size -i IP -l size -n size -u -w size\n", argv[0]);
     return EINVAL;
   }
 
