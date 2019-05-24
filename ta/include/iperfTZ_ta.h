@@ -44,6 +44,7 @@ struct iptz_args {
   uint32_t transmit_bytes;
   char ip[ISPERF_ADDRSTRLEN];
   uint32_t protocol;
+  uint32_t reverse;
 };
 
 struct iptz_results {

@@ -36,7 +36,7 @@ static void init_results(struct iptz_results *results)
   results->worlds_sec = 0;
   results->worlds_msec = 0;
   results->runtime_sec = 0;
-  results->runtime_msec = 0;
+  results->runtime_msec = 1;
 }
 
 static TEE_Result tcp_connect(TEE_tcpSocket_Setup *setup,
@@ -102,18 +102,102 @@ static char *init_buffer(struct iptz_args *args)
   return buffer;
 }
 
-static TEE_Result iperfTZ_recv(uint32_t param_types, TEE_Param __maybe_unused params[4])
+static TEE_Result iperfTZ_recv(uint32_t param_types, TEE_Param params[4])
 {
-  uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_VALUE_INOUT,
-					     TEE_PARAM_TYPE_VALUE_OUTPUT,
-					     TEE_PARAM_TYPE_VALUE_OUTPUT,
-					     TEE_PARAM_TYPE_VALUE_OUTPUT);
+  TEE_iSocket *socket = NULL;
+  TEE_iSocketHandle socketCtx;
+  TEE_Result res;
+  TEE_tcpSocket_Setup tcpSetup;
+  TEE_udpSocket_Setup udpSetup;
+  TEE_Time ta, ti, to;
+  struct iptz_args *args;
+  char *buffer;
+  uint32_t buflen;
+  uint32_t diff;
+  struct iptz_results *results;
+  uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
+					     TEE_PARAM_TYPE_MEMREF_OUTPUT,
+					     TEE_PARAM_TYPE_NONE,
+					     TEE_PARAM_TYPE_NONE);
   if (param_types != exp_param_types)
     return TEE_ERROR_BAD_PARAMETERS;
 
-  (void)&params;
+  args = (struct iptz_args *)params[0].memref.buffer;
+  results = (struct iptz_results *)params[1].memref.buffer;
 
-  return TEE_SUCCESS;
+  buffer = init_buffer(args);
+  if (buffer == NULL)
+    return TEE_ERROR_OUT_OF_MEMORY;
+
+  if (args->protocol == IPERFTZ_TCP) {
+    socket = TEE_tcpSocket;
+    res = tcp_connect(&tcpSetup, &socketCtx, args, TEE_TCP_SET_RECVBUF);
+  } else {
+    socket = TEE_udpSocket;
+    res = udp_connect(&udpSetup, &socketCtx, args);
+  }
+  if (res != TEE_SUCCESS)
+    return res;
+
+  init_results(results);
+
+  /* Send some datagrams first to "synchronize" with the server */
+  if (args->protocol == IPERFTZ_UDP) {
+    buflen = args->blksize < 1024 ? args->blksize : 1024;
+    socket->send(socketCtx, buffer, &buflen, 0);
+  }
+  
+  TEE_GetSystemTime(&ta);
+  do {
+    uint32_t bytes = 0;
+
+    TEE_GetSystemTime(&ti);
+    do {
+      buflen = args->blksize - bytes;
+      res = socket->recv(socketCtx, buffer + bytes, &buflen, 0);
+      bytes += buflen;
+    } while ((bytes < args->blksize) && (res == TEE_SUCCESS));
+    TEE_GetSystemTime(&to);
+    
+    diff = to.millis - ti.millis;
+    if (diff > to.millis) {
+      results->worlds_sec += to.seconds - ti.seconds - 1;
+      results->worlds_msec += to.millis + (0xffffffff - diff);
+    } else {
+      uint32_t seconds;
+      seconds = to.seconds - ti.seconds;
+      results->worlds_sec += seconds;
+      results->worlds_msec += diff;
+      if ((seconds == 0) && (diff == 0))
+	results->zcycles++;
+    }
+
+    while (results->worlds_msec >= 1000) {
+      results->worlds_sec++;
+      results->worlds_msec -= 1000;
+    }
+    
+    results->cycles++;
+    results->bytes_transmitted += bytes;
+
+    diff = to.millis - ta.millis;
+    if (diff > to.millis) {
+      results->runtime_sec = to.seconds - ta.seconds - 1;
+      results->runtime_msec = to.millis + (0xffffffff - diff);
+    } else {
+      results->runtime_sec = to.seconds - ta.seconds;
+      results->runtime_msec = diff;
+    }
+  } while (((args->transmit_bytes == 0) && (results->runtime_sec < 10)) ||
+	   (((args->transmit_bytes > 0) && (results->bytes_transmitted < args->transmit_bytes)) &&
+	    (res == TEE_SUCCESS)));
+
+  socket->close(socketCtx);
+
+  if (res != TEE_SUCCESS)
+    EMSG("recv() failed for socket. Return code: %#0" PRIX32, res);
+
+  return res;
 }
 
 static TEE_Result iperfTZ_send(uint32_t param_types, TEE_Param params[4])
@@ -142,7 +226,7 @@ static TEE_Result iperfTZ_send(uint32_t param_types, TEE_Param params[4])
   if (buffer == NULL)
     return TEE_ERROR_OUT_OF_MEMORY;
 
-  if (args->protocol == ISPERF_TCP) {
+  if (args->protocol == IPERFTZ_TCP) {
     socket = TEE_tcpSocket;
     res = tcp_connect(&tcpSetup, &socketCtx, args, TEE_TCP_SET_SENDBUF);
   } else {
@@ -169,13 +253,13 @@ static TEE_Result iperfTZ_send(uint32_t param_types, TEE_Param params[4])
       } while ((bytes < args->blksize) && (res == TEE_SUCCESS));
       TEE_GetSystemTime(&to);
         
-      diff = ti.millis - ta.millis;
-      if (diff > ti.millis) {
-	results->worlds_sec += ti.seconds - ta.seconds - 1;
-	results->worlds_msec += ti.millis + (0xffffffff - diff);
+      diff = to.millis - ti.millis;
+      if (diff > to.millis) {
+	results->worlds_sec += to.seconds - ti.seconds - 1;
+	results->worlds_msec += to.millis + (0xffffffff - diff);
       } else {
 	uint32_t seconds;
-	seconds = ti.seconds - ta.seconds;
+	seconds = to.seconds - ti.seconds;
 	results->worlds_sec += seconds;
 	results->worlds_msec += diff;
 	if ((seconds == 0) && (diff == 0))

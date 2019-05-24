@@ -39,7 +39,28 @@ struct args {
   size_t socket_bufsize;
   unsigned long int transmit_bytes;
   unsigned int protocol;
+  unsigned long int bitrate;
+  unsigned int reverse;
 };
+
+static int rand_fill(struct args *args, void *buffer) {
+  FILE *f;
+
+  f = fopen("/dev/urandom", "r");
+  if (f == NULL) {
+    perror("fopen");
+    return -1;
+  }
+  if (fread(buffer, sizeof(char), args->blksize, f) < args->blksize) {
+    perror("fread");
+    return -1;
+  }
+  if (fclose(f) == EOF) {
+    perror("fclose");
+    return -1;
+  }
+  return 0;
+}
 
 static void init_args(struct args *args)
 {
@@ -47,6 +68,8 @@ static void init_args(struct args *args)
   args->socket_bufsize = TCP_WINDOW_DEFAULT;
   args->transmit_bytes = 0;
   args->protocol = ISPERF_TCP;
+  args->reverse = 0;
+  args->bitrate = 0;
 }
 
 static char *init_buffer(struct args *args)
@@ -55,6 +78,13 @@ static char *init_buffer(struct args *args)
   if (buffer == NULL)
     perror("calloc");
 
+  if (args->reverse == 1) {
+    if (rand_fill(args, buffer) == -1) {
+      free(buffer);
+      buffer = NULL;
+    }
+  }
+  
   return buffer;
 }
 
@@ -65,13 +95,19 @@ static int parse_args(struct args *args,
   int c;
   int errflg = 0;
 
-  while ((c = getopt(argc, argv, "l:n:uw:")) != -1) {
+  while ((c = getopt(argc, argv, "b:l:n:ruw:")) != -1) {
     switch (c) {
+    case 'b':
+      args->bitrate = strtoul(optarg, (char **)NULL, 10);
+      break;
     case 'l':
       args->blksize = strtoul(optarg, (char **)NULL, 10);
       break;
     case 'n':
       args->transmit_bytes = strtoul(optarg, (char **)NULL, 10);
+      break;
+    case 'r':
+      args->reverse = 1;
       break;
     case 'u':
       args->protocol = ISPERF_UDP;
@@ -90,7 +126,7 @@ static int parse_args(struct args *args,
   }
   if (errflg) {
     errno = EINVAL;
-    fprintf(stderr, "usage: %s -l size -n size -u -w size\n", argv[0]);
+    fprintf(stderr, "usage: %s -b rate -l size -n size -ru -w size\n", argv[0]);
     return EINVAL;
   }
 
@@ -191,6 +227,46 @@ static int tcp_recv(struct args *args, int connection, char *buffer)
   return 0;
 }  
 
+static int tcp_send(struct args *args, int connection, char *buffer)
+{
+  ssize_t bytes_transmitted = 0;
+  ssize_t n;
+  long long net_ns = 0;
+  struct timespec ta, ti, tj, to;
+  long long td = 1;
+
+  clock_gettime(CLOCK_REALTIME, &ta);
+  do {
+    ssize_t bytes = 0;
+
+    if ((args->bitrate == 0) || (args->bitrate > ((bytes_transmitted + args->blksize) * 8 / td * 1000000000LL))) {
+      clock_gettime(CLOCK_REALTIME, &ti);
+      do {
+	n = write(connection, buffer, args->blksize);
+	bytes += n;
+      } while ((bytes < args->blksize) && (n != -1));
+      clock_gettime(CLOCK_REALTIME, &tj);
+      if ((n == -1) && (errno == EAGAIN)) {
+	goto again;
+      } else if (n == -1) {
+	perror("write");
+	return errno;
+      }
+      net_ns += (tj.tv_sec - ti.tv_sec) * 1000000000LL + tj.tv_nsec - ti.tv_nsec;
+      bytes_transmitted += bytes;
+    }
+
+  again:
+    clock_gettime(CLOCK_REALTIME, &to);
+    td = (to.tv_sec - ta.tv_sec) * 1000000000LL + to.tv_nsec - ta.tv_nsec;
+  } while (((args->transmit_bytes == 0) && (td < 10000000000LL)) ||
+	   ((args->transmit_bytes > 0) && (bytes_transmitted < args->transmit_bytes)));
+
+  printf("bytes transmitted: %zd B\nnet time: %lli ns\nruntime = %lli ns\n", bytes_transmitted, net_ns, td);
+
+  return 0;
+}
+
 static int socket_setup(struct args *args, int *sockfd, int *connection)
 {
   int fd, val;
@@ -243,6 +319,52 @@ static int socket_setup(struct args *args, int *sockfd, int *connection)
     perror("fcntl");
     return -1;
   }
+
+  return 0;
+}
+
+static int udp_send(struct args *args, int sockfd, char *buffer)
+{
+  socklen_t addrlen;
+  ssize_t bytes_transmitted = 0;
+  struct sockaddr_in client_addr;
+  ssize_t n;
+  long long net_ns = 0;
+  struct timespec ta, ti, tj, to;
+  long long td = 1;
+
+  /* Wait for some datagrams before sending */
+  do {
+    n = recvfrom(sockfd, buffer, args->blksize, 0, (struct sockaddr *)&client_addr, &addrlen);
+  } while (n <= 0);
+  clock_gettime(CLOCK_REALTIME, &ta);
+  do {
+    ssize_t bytes = 0;
+
+    if ((args->bitrate == 0) || (args->bitrate > ((bytes_transmitted + args->blksize) * 8 / td * 1000000000LL))) {
+      clock_gettime(CLOCK_REALTIME, &ti);
+      do {
+	n = sendto(sockfd, buffer, args->blksize, 0, (struct sockaddr *)&client_addr, addrlen);
+	bytes += n;
+      } while ((bytes < args->blksize) && (n != -1));
+      clock_gettime(CLOCK_REALTIME, &tj);
+      if ((n == -1) && (errno == EAGAIN)) {
+	goto again;
+      } else {
+	perror("sendto");
+	return errno;
+      }
+      net_ns += (tj.tv_sec - ti.tv_sec) * 1000000000LL + tj.tv_nsec - ti.tv_nsec;
+      bytes_transmitted += bytes;
+    }
+
+  again:
+    clock_gettime(CLOCK_REALTIME, &to);
+    td = (to.tv_sec - ta.tv_sec) * 1000000000LL + to.tv_nsec - ta.tv_nsec;
+  } while (((args->transmit_bytes == 0) && (td < 10000000000LL)) ||
+	   ((args->transmit_bytes > 0) && (bytes_transmitted < args->transmit_bytes)));
+
+  printf("bytes transmitted: %zd B\nnet time: %lli ns\nruntime = %lli ns\n", bytes_transmitted, net_ns, td);
 
   return 0;
 }
@@ -324,11 +446,17 @@ int main(int argc, char *argv[])
     goto cleanup;
   
   if (args.protocol == ISPERF_TCP) {
-    rc = tcp_recv(&args, connection, buffer);
+    if (args.reverse == 0)
+      rc = tcp_recv(&args, connection, buffer);
+    else
+      rc = tcp_send(&args, connection, buffer);
     if (rc == 0)
       rc = tcp_print_results(connection);
   } else {
-    rc = udp_recv(&args, sockfd, buffer);
+    if (args.reverse == 0)
+      rc = udp_recv(&args, sockfd, buffer);
+    else
+      rc = udp_send(&args, sockfd, buffer);
   }
   
  cleanup:

@@ -49,7 +49,8 @@ static void init_args(struct iptz_args *args)
 {
   args->blksize = TCP_WINDOW_DEFAULT;
   args->socket_bufsize = TCP_WINDOW_DEFAULT;
-  args->protocol = ISPERF_TCP;
+  args->protocol = IPERFTZ_TCP;
+  args->reverse = 0;
 }
 
 static int parse_args(struct iptz_args *args,
@@ -59,13 +60,13 @@ static int parse_args(struct iptz_args *args,
   int c;
   int errflg = 0;
   
-  while ((c = getopt(argc, argv, "b:i:l:n:uw:")) != -1) {
+  while ((c = getopt(argc, argv, "b:i:l:n:ruw:")) != -1) {
     switch (c) {
     case 'b':
       args->bitrate = strtoul(optarg, (char **)NULL, 10);
       break;
     case 'i':
-      strncpy(args->ip, optarg, ISPERF_ADDRSTRLEN);
+      strncpy(args->ip, optarg, IPERFTZ_ADDRSTRLEN);
       break;
     case 'l':
       args->blksize = strtoul(optarg, (char **)NULL, 10);
@@ -73,8 +74,11 @@ static int parse_args(struct iptz_args *args,
     case 'n':
       args->transmit_bytes = strtoul(optarg, (char **)NULL, 10);
       break;
+    case 'r':
+      args->reverse = 1;
+      break;
     case 'u':
-      args->protocol = ISPERF_UDP;
+      args->protocol = IPERFTZ_UDP;
       break;
     case 'w':
       args->socket_bufsize = strtoul(optarg, (char **)NULL, 10);
@@ -94,7 +98,7 @@ static int parse_args(struct iptz_args *args,
   }
   if (errflg) {
     errno = EINVAL;
-    fprintf(stderr, "usage: %s -b size -i IP -l size -n size -u -w size\n", argv[0]);
+    fprintf(stderr, "usage: %s -b size -i IP -l size -n size -ru -w size\n", argv[0]);
     return EINVAL;
   }
 
@@ -110,6 +114,7 @@ int main(int argc, char *argv[])
   TEEC_Session sess;
   TEEC_SharedMemory args_sm, results_sm;
   TEEC_UUID uuid = IPERFTZ_TA_UUID;
+  uint32_t command_id = IPERFTZ_TA_SEND;
   uint32_t ret_orig;
   struct iptz_args *args;
   struct iptz_results *results;
@@ -143,6 +148,9 @@ int main(int argc, char *argv[])
   rc = parse_args(args, argv, argc);
   if (rc != 0)
     goto session_err;
+
+  if (args->reverse)
+    command_id = IPERFTZ_TA_RECV;
   
   results = (struct iptz_results *)results_sm.buffer;
     
@@ -165,7 +173,7 @@ int main(int argc, char *argv[])
   op.params[1].memref.offset = 0;
   op.params[1].memref.size = results_sm.size;
 
-  res = TEEC_InvokeCommand(&sess, IPERFTZ_TA_SEND, &op, &ret_orig);
+  res = TEEC_InvokeCommand(&sess, command_id, &op, &ret_orig);
   if (res != TEEC_SUCCESS) {
     fprintf(stderr, "TEEC_InvokeCommand failed with code %#" PRIx32 " origin %#" PRIx32, res, ret_orig);
     rc = EXIT_FAILURE;
