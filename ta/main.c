@@ -122,6 +122,7 @@ static TEE_Result iperfTZ_send(uint32_t param_types, TEE_Param params[4])
   TEE_iSocketHandle socketCtx;
   TEE_Result res;
   TEE_tcpSocket_Setup tcpSetup;
+  TEE_udpSocket_Setup udpSetup;
   TEE_Time ta, ti, to;
   char *buffer;
   uint32_t buflen;
@@ -140,9 +141,14 @@ static TEE_Result iperfTZ_send(uint32_t param_types, TEE_Param params[4])
   buffer = init_buffer(args);
   if (buffer == NULL)
     return TEE_ERROR_OUT_OF_MEMORY;
-  
-  socket = TEE_tcpSocket;
-  res = tcp_connect(&tcpSetup, &socketCtx, args, TEE_TCP_SET_SENDBUF);
+
+  if (args->protocol == ISPERF_TCP) {
+    socket = TEE_tcpSocket;
+    res = tcp_connect(&tcpSetup, &socketCtx, args, TEE_TCP_SET_SENDBUF);
+  } else {
+    socket = TEE_udpSocket;
+    res = udp_connect(&udpSetup, &socketCtx, args);
+  }
   if (res != TEE_SUCCESS)
     return res;
   

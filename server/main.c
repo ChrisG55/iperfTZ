@@ -102,7 +102,6 @@ static int tcp_connect(struct sockaddr_in *server_addr,
 		       int sockfd)
 {
   socklen_t addrlen;
-  int val;
   
   if (listen(sockfd, 5) == -1) {
     perror("listen");
@@ -116,24 +115,7 @@ static int tcp_connect(struct sockaddr_in *server_addr,
     return -1;
   }
 
-  if ((val = fcntl(*connection, F_GETFD, 0)) == -1) {
-    perror("fcntl");
-    goto tcp_cleanup;
-  }
-
-  val |= O_NONBLOCK;
-  
-  if ((val = fcntl(*connection, F_SETFL, val)) == -1) {
-    perror("fcntl");
-    goto tcp_cleanup;
-  }
-
   return 0;
-
- tcp_cleanup:
-  close(connection);
-  close(sockfd);
-  return -1;
 }
 
 static int tcp_print_results(int connection)
@@ -162,8 +144,56 @@ static int tcp_print_results(int connection)
   return rc;
 }
 
+static int tcp_recv(struct args *args, int connection, char *buffer)
+{
+  ssize_t bytes_transmitted = 0;
+  ssize_t n;
+  long long net_ns = 0;
+  struct timespec ta, ti, tj, to;
+  long long td;
+  
+  clock_gettime(CLOCK_REALTIME, &ta);
+  do {
+    clock_gettime(CLOCK_REALTIME, &ti);
+    n = read(connection, buffer, args->blksize);
+    clock_gettime(CLOCK_REALTIME, &tj);
+    if (n == -1) {
+      switch (errno) {
+      case EAGAIN:
+	goto again;
+      case ETIMEDOUT:
+	puts("Transmission timeout occurred");
+	return errno;
+      default:
+	perror("read");
+	return errno;
+      }
+    }
+    net_ns += (tj.tv_sec - ti.tv_sec) * 1000000000LL + tj.tv_nsec - ti.tv_nsec;
+    bytes_transmitted += n;
+  again:
+    clock_gettime(CLOCK_REALTIME, &to);
+    td = (to.tv_sec - ta.tv_sec) * 1000000000LL + to.tv_nsec - ta.tv_nsec;
+  } while (((args->transmit_bytes == 0) && (td < 10000000000LL)) ||
+	   ((args->transmit_bytes > 0) && (bytes_transmitted < args->transmit_bytes)));
+  
+  printf("bytes transmitted: %zd B\nnet time: %lli ns\nruntime = %lli ns\n", bytes_transmitted, net_ns, td);
+
+  // Drain the connection
+  puts("Draining the connection for 2 seconds");
+  clock_gettime(CLOCK_REALTIME, &ta);
+  do {
+    n = read(connection, buffer, args->blksize);
+    clock_gettime(CLOCK_REALTIME, &to);
+    td = (to.tv_sec - ta.tv_sec) * 1000000000LL + to.tv_nsec - ta.tv_nsec;
+  } while ((td < 2000000000LL) || (n > 0));
+
+  return 0;
+}  
+
 static int socket_setup(struct args *args, int *sockfd, int *connection)
 {
+  int fd, val;
   int sock_type = SOCK_STREAM;
   struct sockaddr_in server_addr;
   in_port_t port = 5002;
@@ -194,9 +224,78 @@ static int socket_setup(struct args *args, int *sockfd, int *connection)
     return -1;
   }
 
-  if (args->protocol == ISPERF_TCP)
-    return tcp_connect(&server_addr, connection, *sockfd);
+  if (args->protocol == ISPERF_TCP) {
+    if (tcp_connect(&server_addr, connection, *sockfd) != 0)
+      return -1;
+    fd = *connection;
+  } else {
+    fd = *sockfd;
+  }
+
+  if ((val = fcntl(fd, F_GETFD, 0)) == -1) {
+    perror("fcntl");
+    return -1;
+  }
+
+  val |= O_NONBLOCK;
   
+  if ((val = fcntl(fd, F_SETFL, val)) == -1) {
+    perror("fcntl");
+    return -1;
+  }
+
+  return 0;
+}
+
+static int udp_recv(struct args *args, int sockfd, char *buffer)
+{
+  socklen_t addrlen;
+  ssize_t bytes_transmitted = 0;
+  struct sockaddr_in client_addr;
+  ssize_t n;
+  long long net_ns = 0;
+  struct timespec ta, ti, tj, to;
+  long long td;
+
+  do {
+    n = recvfrom(sockfd, buffer, args->blksize, MSG_PEEK, (struct sockaddr *)&client_addr, &addrlen);
+  } while (n <= 0);
+  clock_gettime(CLOCK_REALTIME, &ta);
+  do {
+    clock_gettime(CLOCK_REALTIME, &ti);
+    n = recvfrom(sockfd, buffer, args->blksize, 0, (struct sockaddr *)&client_addr, &addrlen);
+    clock_gettime(CLOCK_REALTIME, &tj);
+    if (n == -1) {
+      switch (errno) {
+      case EAGAIN:
+	goto again;
+      case ETIMEDOUT:
+	puts("Transmission timeout occurred");
+	return errno;
+      default:
+	perror("recvfrom");
+	return errno;
+      }
+    }
+    net_ns += (tj.tv_sec - ti.tv_sec) * 1000000000LL + tj.tv_nsec - ti.tv_nsec;
+    bytes_transmitted += n;
+  again:
+    clock_gettime(CLOCK_REALTIME, &to);
+    td = (to.tv_sec - ta.tv_sec) * 1000000000LL + to.tv_nsec - ta.tv_nsec;
+  } while (((args->transmit_bytes == 0) && (td < 10000000000LL)) ||
+	   ((args->transmit_bytes > 0) && (bytes_transmitted < args->transmit_bytes)));
+  
+  printf("bytes transmitted: %zd B\nnet time: %lli ns\nruntime = %lli ns\n", bytes_transmitted, net_ns, td);
+
+  // Drain the connection
+  puts("Draining the connection for 2 seconds");
+  clock_gettime(CLOCK_REALTIME, &ta);
+  do {
+    n = recvfrom(sockfd, buffer, args->blksize, 0, (struct sockaddr *)&client_addr, &addrlen);
+    clock_gettime(CLOCK_REALTIME, &to);
+    td = (to.tv_sec - ta.tv_sec) * 1000000000LL + to.tv_nsec - ta.tv_nsec;
+  } while ((td < 2000000000LL) || (n > 0));
+
   return 0;
 }
 
@@ -205,10 +304,6 @@ int main(int argc, char *argv[])
   char *buffer;
   int rc = EXIT_SUCCESS;
   int connection, sockfd;
-  long long td;
-  long long net_ns = 0;
-  ssize_t bytes_transmitted = 0, n;
-  struct timespec ta, ti, tj, to;
   struct args args;
 
   init_args(&args);
@@ -228,45 +323,13 @@ int main(int argc, char *argv[])
   if (rc != 0)
     goto cleanup;
   
-  clock_gettime(CLOCK_REALTIME, &ta);
-  do {
-    clock_gettime(CLOCK_REALTIME, &ti);
-    n = read(connection, buffer, args.blksize);
-    clock_gettime(CLOCK_REALTIME, &tj);
-    if (n == -1) {
-      switch (errno) {
-      case EAGAIN:
-	goto again;
-      case ETIMEDOUT:
-	puts("Transmission timeout occurred");
-	rc = errno;
-	goto cleanup;
-      default:
-	perror("read");
-	rc = errno;
-	goto cleanup;
-      }
-    }
-    net_ns += (tj.tv_sec - ti.tv_sec) * 1000000000LL + tj.tv_nsec - ti.tv_nsec;
-    bytes_transmitted += n;
-  again:
-    clock_gettime(CLOCK_REALTIME, &to);
-    td = (to.tv_sec - ta.tv_sec) * 1000000000LL + to.tv_nsec - ta.tv_nsec;
-  } while (((args.transmit_bytes == 0) && (td < 10000000000LL)) ||
-	   ((args.transmit_bytes > 0) && (bytes_transmitted < args.transmit_bytes)));
-  
-  printf("bytes transmitted: %zd B\nnet time: %lli ns\nruntime = %lli ns\n", bytes_transmitted, net_ns, td);
-
-  // Drain the connection
-  puts("Draining the connection for 2 seconds");
-  clock_gettime(CLOCK_REALTIME, &ta);
-  do {
-    n = read(connection, buffer, args.blksize);
-    clock_gettime(CLOCK_REALTIME, &to);
-    td = (to.tv_sec - ta.tv_sec) * 1000000000LL + to.tv_nsec - ta.tv_nsec;
-  } while ((td < 2000000000LL) || (n > 0));
-
-  rc = tcp_print_results(connection);
+  if (args.protocol == ISPERF_TCP) {
+    rc = tcp_recv(&args, connection, buffer);
+    if (rc == 0)
+      rc = tcp_print_results(connection);
+  } else {
+    rc = udp_recv(&args, sockfd, buffer);
+  }
   
  cleanup:
   free(buffer);
