@@ -22,13 +22,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <tee_client_api.h>
 
 #include <iperfTZ_ta.h>
 
-static int print_results(struct iptz_results *results, struct iptz_args *args)
+static int print_results(struct iptz_results *results,
+			 struct iptz_args *args,
+			 struct timespec *ta,
+			 struct timespec *to)
 {
   FILE *fp;
 
@@ -39,7 +43,18 @@ static int print_results(struct iptz_results *results, struct iptz_args *args)
     perror("fopen");
     return errno;
   }
-  fprintf(fp, "%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 ".%.3" PRIu32 ",%" PRIu32 ",%" PRIu32 "\n", args->blksize >> 10, args->socket_bufsize >> 10, results->bytes_transmitted, results->runtime_sec, results->runtime_msec, results->cycles, results->zcycles);
+  /*
+   * CSV format:
+   * 1. Chunk size in KiB
+   * 2. Socket buffer size in KiB
+   * 3. Number of bytes transmitted
+   * 4. Runtime in seconds
+   * 5. Number of transmitted chunks
+   * 6. Number of transmitted chunks in less than 1 millisecond
+   * 7. Start time in seconds since epoch
+   * 8. End time in seconds since epoch
+   */  
+  fprintf(fp, "%" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%" PRIu32 ".%.3" PRIu32 ",%" PRIu32 ",%" PRIu32 ",%lli.%li,%lli.%li\n", args->blksize >> 10, args->socket_bufsize >> 10, results->bytes_transmitted, results->runtime_sec, results->runtime_msec, results->cycles, results->zcycles, (long long int)ta->tv_sec, ta->tv_nsec, (long long int)to->tv_sec, to->tv_nsec);
   fclose(fp);
 
   return 0;
@@ -59,11 +74,16 @@ static int parse_args(struct iptz_args *args,
 {
   int c;
   int errflg = 0;
+  unsigned long long br;
   
   while ((c = getopt(argc, argv, "b:i:l:n:ruw:")) != -1) {
     switch (c) {
     case 'b':
-      args->bitrate = strtoul(optarg, (char **)NULL, 10);
+      br = strtoull(optarg, (char **)NULL, 10);
+      if (br > UINT32_MAX)
+	args->bitrate = UINT32_MAX;
+      else
+	args->bitrate = br;
       break;
     case 'i':
       strncpy(args->ip, optarg, IPERFTZ_ADDRSTRLEN);
@@ -118,6 +138,7 @@ int main(int argc, char *argv[])
   uint32_t ret_orig;
   struct iptz_args *args;
   struct iptz_results *results;
+  struct timespec ta, to;
 
   res = TEEC_InitializeContext(NULL, &ctx);
   if (res != TEEC_SUCCESS) {
@@ -173,12 +194,14 @@ int main(int argc, char *argv[])
   op.params[1].memref.offset = 0;
   op.params[1].memref.size = results_sm.size;
 
+  clock_gettime(CLOCK_REALTIME, &ta);
   res = TEEC_InvokeCommand(&sess, command_id, &op, &ret_orig);
+  clock_gettime(CLOCK_REALTIME, &to);
   if (res != TEEC_SUCCESS) {
     fprintf(stderr, "TEEC_InvokeCommand failed with code %#" PRIx32 " origin %#" PRIx32, res, ret_orig);
     rc = EXIT_FAILURE;
   } else {
-    rc = print_results(results, args);
+    rc = print_results(results, args, &ta, &to);
   }
 
   TEEC_CloseSession(&sess);
