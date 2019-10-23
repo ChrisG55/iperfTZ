@@ -48,3 +48,7 @@ TEEC_EXPORT=/path/to/optee/optee_client/out/export/usr
 ---
 
 The build output can then be found in the `out/` folder of iperfTZ's base folder.
+
+## Acknowledgement
+
+This work has been supported by EU H2020 ICT project LEGaTO, contract #780681 .
