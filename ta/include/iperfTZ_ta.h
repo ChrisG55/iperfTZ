@@ -17,7 +17,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #ifndef IPERFTZ_TA_H
-#define ITZPERF_TA_H
+#define IPERFTZ_TA_H
 
 #define IPERFTZ_TA_UUID \
 	{ 0xe649d2ad, 0x543f, 0x4220, \
@@ -30,11 +30,11 @@ enum cmd_id {
 };
 
 enum protocol {
-  ISPERF_TCP,
-  ISPERF_UDP
+  IPERFTZ_TCP,
+  IPERFTZ_UDP
 };
 
-#define ISPERF_ADDRSTRLEN 46
+#define IPERFTZ_ADDRSTRLEN 46
 #define TCP_WINDOW_DEFAULT (16 * 1024)
 
 struct iptz_args {
@@ -42,7 +42,7 @@ struct iptz_args {
   uint32_t socket_bufsize;
   uint32_t bitrate;
   uint32_t transmit_bytes;
-  char ip[ISPERF_ADDRSTRLEN];
+  char ip[IPERFTZ_ADDRSTRLEN];
   uint32_t protocol;
   uint32_t reverse;
 };

@@ -67,7 +67,7 @@ static void init_args(struct args *args)
   args->blksize = TCP_WINDOW_DEFAULT;
   args->socket_bufsize = TCP_WINDOW_DEFAULT;
   args->transmit_bytes = 0;
-  args->protocol = ISPERF_TCP;
+  args->protocol = IPERFTZ_TCP;
   args->reverse = 0;
   args->bitrate = 0;
 }
@@ -110,7 +110,7 @@ static int parse_args(struct args *args,
       args->reverse = 1;
       break;
     case 'u':
-      args->protocol = ISPERF_UDP;
+      args->protocol = IPERFTZ_UDP;
       break;
     case 'w':
       args->socket_bufsize = strtoul(optarg, (char **)NULL, 10);
@@ -274,7 +274,7 @@ static int socket_setup(struct args *args, int *sockfd, int *connection)
   struct sockaddr_in server_addr;
   in_port_t port = 5002;
 
-  if (args->protocol == ISPERF_UDP)
+  if (args->protocol == IPERFTZ_UDP)
     sock_type = SOCK_DGRAM;
   
   *sockfd = socket(AF_INET, sock_type, 0);
@@ -283,7 +283,7 @@ static int socket_setup(struct args *args, int *sockfd, int *connection)
     return *sockfd;
   }
 
-  if (args->protocol == ISPERF_TCP) {
+  if (args->protocol == IPERFTZ_TCP) {
     if (setsockopt(*sockfd, SOL_SOCKET, SO_RCVBUF, &args->socket_bufsize, sizeof(args->socket_bufsize)) == -1) {
       perror("setsockopt");
       return -1;
@@ -300,7 +300,7 @@ static int socket_setup(struct args *args, int *sockfd, int *connection)
     return -1;
   }
 
-  if (args->protocol == ISPERF_TCP) {
+  if (args->protocol == IPERFTZ_TCP) {
     if (tcp_connect(&server_addr, connection, *sockfd) != 0)
       return -1;
     fd = *connection;
@@ -445,7 +445,7 @@ int main(int argc, char *argv[])
   if (rc != 0)
     goto cleanup;
   
-  if (args.protocol == ISPERF_TCP) {
+  if (args.protocol == IPERFTZ_TCP) {
     if (args.reverse == 0)
       rc = tcp_recv(&args, connection, buffer);
     else
@@ -461,7 +461,7 @@ int main(int argc, char *argv[])
   
  cleanup:
   free(buffer);
-  if (args.protocol == ISPERF_TCP)
+  if (args.protocol == IPERFTZ_TCP)
     close(connection);
   close(sockfd);
   
