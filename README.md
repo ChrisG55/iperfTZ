@@ -41,7 +41,7 @@ OP-TEE v3.5.
 ```
 TEEC_EXPORT=/path/to/optee/optee_client/out/export
 ```
-* with OP-TEE v3.5:
+* with OP-TEE v3.5 and later:
 ```
 TEEC_EXPORT=/path/to/optee/optee_client/out/export/usr
 ```
